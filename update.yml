@@ -28,7 +28,7 @@ jobs:
 
       - name: Alle Ligen neu berechnen
         run: |
-          python fussball_modell.py --export \
+          python modell.py --export \
             --saisons 2223 2324 2425 2526 2627
 
       - name: Manifest und Service Worker einbinden
