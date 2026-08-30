@@ -1,0 +1,35 @@
+name: Daten aktualisieren
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * 1"
+permissions:
+  contents: write
+jobs:
+  bauen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy pandas scipy
+      - run: python modell.py --export --saisons 2223 2324 2425 2526 2627
+      - run: |
+          python - <<'PY'
+          h = open("wettrechner_alle.html", encoding="utf-8").read()
+          if "manifest.json" not in h:
+              h = h.replace("</head>", '<link rel="manifest" href="manifest.json"><link rel="apple-touch-icon" href="icon-192.png"></head>', 1)
+          if "serviceWorker" not in h:
+              h = h.replace("</body>", '<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){})})}</script></body>', 1)
+          assert "var LIGEN" in h and len(h) > 20000
+          open("index.html", "w", encoding="utf-8").write(h)
+          print("ok", len(h))
+          PY
+      - run: |
+          git config user.name "Bot"
+          git config user.email "actions@github.com"
+          rm -rf daten wettrechner_alle.html
+          git add index.html
+          git diff --staged --quiet || (git commit -m "Daten aktualisiert" && git push)
