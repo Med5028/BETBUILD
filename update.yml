@@ -1,0 +1,93 @@
+name: Daten aktualisieren
+
+on:
+  schedule:
+    # Montags 05:00 UTC — nach dem Wochenende, wenn alle Ergebnisse drin sind
+    - cron: "0 5 * * 1"
+  workflow_dispatch:        # Knopf zum sofortigen Starten
+
+permissions:
+  contents: write
+
+jobs:
+  aktualisieren:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Repository holen
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Pakete installieren
+        run: pip install numpy pandas scipy
+
+      - name: Alle Ligen neu berechnen
+        run: |
+          python fussball_modell.py --export \
+            --saisons 2223 2324 2425 2526 2627
+
+      - name: Manifest und Service Worker einbinden
+        run: |
+          python - << 'PY'
+          h = open("wettrechner_alle.html", encoding="utf-8").read()
+
+          kopf = ('<link rel="manifest" href="manifest.json">\n'
+                  '<link rel="apple-touch-icon" href="icon-192.png">\n')
+          if "manifest.json" not in h:
+              h = h.replace("</head>", kopf + "</head>", 1)
+
+          reg = ('<script>\n'
+                 'if ("serviceWorker" in navigator) {\n'
+                 '  window.addEventListener("load", function(){\n'
+                 '    navigator.serviceWorker.register("sw.js").catch(function(){});\n'
+                 '  });\n'
+                 '}\n'
+                 '</script>\n</body>')
+          if "serviceWorker" not in h:
+              h = h.replace("</body>", reg, 1)
+
+          open("index.html", "w", encoding="utf-8").write(h)
+          print("index.html geschrieben:", len(h), "Zeichen")
+          PY
+
+      - name: Ergebnis prüfen
+        run: |
+          test -s index.html
+          python - << 'PY'
+          import re, json, sys
+          h = open("index.html", encoding="utf-8").read()
+          m = re.search(r"var LIGEN = (\{.*?\});\s*\n\s*var MODELL", h, re.S)
+          if not m:
+              sys.exit("Ligablock nicht gefunden — Abbruch")
+          d = json.loads(m.group(1))
+          teams = sum(len(v["teams"]) for v in d.values())
+          print(f"{len(d)} Ligen, {teams} Teams")
+          for c, v in sorted(d.items()):
+              print(f"  {c:4s} {v['name']:26s} {len(v['teams']):3d} Teams  Stand {v['stand']}")
+          if len(d) < 5 or teams < 100:
+              sys.exit("Zu wenig Inhalt — alte Datei bleibt bestehen")
+          for tag in ('rel="manifest"', "serviceWorker.register"):
+              if tag not in h:
+                  sys.exit(f"{tag} fehlt")
+          print("Pruefung bestanden")
+          PY
+
+      - name: Änderungen speichern
+        run: |
+          git config user.name "Wettrechner Bot"
+          git config user.email "actions@github.com"
+          git add index.html
+          if git diff --staged --quiet; then
+            echo "Keine Änderungen."
+          else
+            git commit -m "Daten aktualisiert $(date '+%Y-%m-%d')"
+            git push
+          fi
+
+      - name: Aufräumen
+        run: rm -rf daten wettrechner_alle.html
